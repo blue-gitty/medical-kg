@@ -1,0 +1,19 @@
+# MEDKG - Medical Knowledge Graph Requirements
+
+# Core dependencies
+python-dotenv>=1.0.0
+requests>=2.31.0
+
+# PubMed client (Entrez)
+biopython>=1.83
+
+# MCP Server (Model Context Protocol)
+mcp>=0.1.0
+
+# Data handling
+pydantic>=2.0.0
+
+# Optional: For future PostgreSQL integration
+# psycopg2-binary>=2.9.0
+# sqlalchemy>=2.0.0
+
