@@ -9,7 +9,7 @@ import os
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from api.umls_client import UMLSAPIClient
+from medkg.api.umls_client import UMLSAPIClient
 from typing import Dict, List, Set, Any
 
 # Hard-coded allowed entity types and their semantic group mappings

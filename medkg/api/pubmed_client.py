@@ -167,6 +167,67 @@ class PubMedAPIClient:
                             return True
         return False
 
+    @staticmethod
+    def _build_date_filter(start_date: Optional[str] = None, end_date: Optional[str] = None) -> str:
+        """
+        Build a PubMed date range filter string.
+        
+        Args:
+            start_date: Start date in format "YYYY/MM/DD", "YYYY/MM", or "YYYY"
+            end_date: End date in format "YYYY/MM/DD", "YYYY/MM", or "YYYY"
+        
+        Returns:
+            Date filter string for PubMed query (e.g., "2020/01/01:2023/12/31[PDAT]")
+        """
+        if not start_date and not end_date:
+            return ""
+        
+        # Validate and normalize date formats
+        def normalize_date(date_str: str) -> str:
+            """Normalize date string to PubMed format."""
+            date_str = date_str.strip()
+            # Accept YYYY, YYYY/MM, or YYYY/MM/DD
+            parts = date_str.split("/")
+            if len(parts) == 1:
+                # YYYY
+                if len(parts[0]) == 4 and parts[0].isdigit():
+                    return parts[0]
+            elif len(parts) == 2:
+                # YYYY/MM
+                if len(parts[0]) == 4 and parts[0].isdigit() and len(parts[1]) == 2 and parts[1].isdigit():
+                    return f"{parts[0]}/{parts[1]}"
+            elif len(parts) == 3:
+                # YYYY/MM/DD
+                if (len(parts[0]) == 4 and parts[0].isdigit() and 
+                    len(parts[1]) == 2 and parts[1].isdigit() and 
+                    len(parts[2]) == 2 and parts[2].isdigit()):
+                    return f"{parts[0]}/{parts[1]}/{parts[2]}"
+            raise ValueError(f"Invalid date format: {date_str}. Use YYYY, YYYY/MM, or YYYY/MM/DD")
+        
+        start_val = None
+        end_val = None
+        
+        if start_date:
+            start_val = normalize_date(start_date)
+        if end_date:
+            end_val = normalize_date(end_date)
+        
+        if start_val and end_val:
+            # Date range: ensure start <= end
+            return f"{start_val}:{end_val}[PDAT]"
+        elif start_val:
+            # From start_date onwards: use current year + 1 as end
+            from datetime import datetime
+            current_year = datetime.now().year
+            end_val = f"{current_year + 1}/12/31"
+            return f"{start_val}:{end_val}[PDAT]"
+        elif end_val:
+            # Up to end_date: use 1800 as start (PubMed's earliest reasonable date)
+            start_val = "1800/01/01"
+            return f"{start_val}:{end_val}[PDAT]"
+        
+        return ""
+
     def search(
         self,
         query: str,
@@ -176,6 +237,8 @@ class PubMedAPIClient:
         max_pages: int = 10,
         use_smart_query: bool = True,
         return_query: bool = False,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Search PubMed and return clean results with PMID + title.
@@ -188,6 +251,18 @@ class PubMedAPIClient:
             max_pages: Maximum pages to paginate (for full_text_only)
             use_smart_query: If True, convert user query to structured PubMed query via UMLS/MeSH
             return_query: If True, return dict with 'query' and 'results' keys instead of just results
+            start_date: Start date for filtering (format: "YYYY/MM/DD", "YYYY/MM", or "YYYY")
+            end_date: End date for filtering (format: "YYYY/MM/DD", "YYYY/MM", or "YYYY")
+        
+        Examples:
+            # Search with date range
+            client.search("intracranial aneurysm", start_date="2020/01/01", end_date="2023/12/31")
+            
+            # Search from a specific year onwards
+            client.search("inflammation", start_date="2020")
+            
+            # Search up to a specific date
+            client.search("hemodynamics", end_date="2022/12/31")
         """
         if not query or not query.strip():
             return [] if not return_query else {'query': query, 'original_query': None, 'results': []}
@@ -198,12 +273,18 @@ class PubMedAPIClient:
         # Convert user query to structured PubMed query using UMLS/MeSH
         if use_smart_query:
             try:
-                from medkg.query_builder import query_to_pubmed_query
+                from ..search.builder import query_to_pubmed_query
                 final_query = query_to_pubmed_query(query, score_threshold=0.8)
                 logger.debug(f"Smart query built: {final_query[:200]}...")
             except Exception as e:
                 logger.warning(f"Smart query building failed, using raw query: {e}")
                 final_query = query
+        
+        # Add date range filter if provided
+        date_filter = self._build_date_filter(start_date, end_date)
+        if date_filter:
+            final_query = f"({final_query}) AND {date_filter}"
+            logger.debug(f"Date filter applied: {date_filter}")
         
         query = final_query
 
@@ -288,6 +369,18 @@ class PubMedAPIClient:
         return results_list
 
     # Convenience alias for your intent (matches `templates.py` naming)
-    def search_with_fulltext(self, query: str, max_results: int = 20) -> List[Dict[str, Any]]:
-        return self.search(query=query, max_results=max_results, full_text_only=True)
+    def search_with_fulltext(
+        self, 
+        query: str, 
+        max_results: int = 20,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        return self.search(
+            query=query, 
+            max_results=max_results, 
+            full_text_only=True,
+            start_date=start_date,
+            end_date=end_date,
+        )
 

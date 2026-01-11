@@ -1,10 +1,7 @@
-"""
-Lightweight query builder: User query → N-grams → UMLS → MeSH → PubMed query
-Follows exact workflow from templates.py
-"""
+import concurrent.futures
 from typing import List, Dict, Set, Any, Optional
 
-from api.umls_client import UMLSAPIClient
+from ..api.umls_client import UMLSAPIClient
 
 # Stop words for n-gram extraction
 STOP_WORDS: Set[str] = {
@@ -16,11 +13,9 @@ STOP_WORDS: Set[str] = {
     'these', 'those', 'i', 'you', 'he', 'she', 'it', 'we', 'they'
 }
 
-
 def remove_stop_words(tokens: List[str]) -> List[str]:
     """Remove stop words from a list of tokens."""
     return [token for token in tokens if token not in STOP_WORDS]
-
 
 def tokenize(text: str, remove_stopwords: bool = True) -> List[str]:
     """Simple tokenization - split on whitespace, clean, and optionally remove stop words."""
@@ -36,25 +31,36 @@ def tokenize(text: str, remove_stopwords: bool = True) -> List[str]:
     
     return cleaned
 
-
 def get_ngrams_by_size(text: str, n: int, remove_stopwords: bool = True) -> List[str]:
     """Get n-grams of a specific size only."""
     tokens = tokenize(text, remove_stopwords=remove_stopwords)
     return [' '.join(tokens[i:i+n]) for i in range(len(tokens) - n + 1)]
 
+def process_umls_match(term: str, client: UMLSAPIClient) -> tuple:
+    """Helper function to fetch match for a single term."""
+    best = client.search_best_match(term, threshold=0.6)
+    formatted_data = None
+    
+    if best and best.get('allowed_type_tuis'):
+        formatted_data = {
+            'cui': best['cui'],
+            'name': best['name'],
+            'combined_score': best['combined_score'],
+            'mesh_term': best['mesh_term'],
+            'semantic_type_names': best.get('semantic_type_names', []),
+            'allowed_type_names': best.get('allowed_type_names', []),
+            'allowed_type_tuis': best.get('allowed_type_tuis', [])
+        }
+    return term, formatted_data
 
 def build_pubmed_query_unigram_bigram(unigram_matches, bigram_matches, score_threshold=0.8):
     """
     Smart query with proper CUI deduplication.
-    
-    1. Take unigrams with score == 1.0 as base concepts
-    2. Add related bigrams to unigram groups (OR clauses)
-    3. Prevent CUI duplication across groups
+    (Logic preserved exactly as requested)
     """
-    
     # Get perfect unigram matches
     core_unigrams = []
-    core_cui_set = set()  # Track to prevent duplication
+    core_cui_set = set()
     
     for unigram, data in unigram_matches.items():
         score = data.get('score', data.get('combined_score', 0))
@@ -109,7 +115,7 @@ def build_pubmed_query_unigram_bigram(unigram_matches, bigram_matches, score_thr
                 unigram_group['related_bigrams'].append(bigram_concept)
                 used_bigram_cuis.add(bigram_cui)
                 matched = True
-                break  # Only add to first matching group
+                break
         
         if not matched:
             standalone_bigrams.append(bigram_concept)
@@ -154,64 +160,59 @@ def build_pubmed_query_unigram_bigram(unigram_matches, bigram_matches, score_thr
         'standalone_bigrams': len(standalone_bigrams)
     }
 
-
 def query_to_pubmed_query(query: str, score_threshold: float = 0.8) -> str:
     """
-    Convert a natural language query to a PubMed query string.
-    
-    Process:
-    1. Extract unigrams and bigrams (stop words removed)
-    2. Find UMLS matches for each (with allowed semantic types)
-    3. Build PubMed query grouping bigrams with related unigrams
-    
-    Args:
-        query: Natural language query string
-        score_threshold: Minimum score for bigrams (default: 0.8)
-        
-    Returns:
-        PubMed query string ready to use
+    Optimized conversion of natural language query to PubMed query string.
+    Uses concurrent execution for UMLS lookups.
     """
     client = UMLSAPIClient()
     
-    # Extract unigrams and bigrams
+    # 1. Extract raw n-grams
     unigrams = get_ngrams_by_size(query, n=1, remove_stopwords=True)
     bigrams = get_ngrams_by_size(query, n=2, remove_stopwords=True)
     
-    # Get UMLS matches for unigrams
+    # 2. Identify unique terms to query (deduplication)
+    # We use sets to avoid redundant API calls for repeated words
+    unique_unigrams = set(unigrams)
+    unique_bigrams = set(bigrams)
+    
     unigram_matches = {}
-    for unigram in unigrams:
-        best = client.search_best_match(unigram, threshold=0.6)
-        if best and best.get('allowed_type_tuis'):
-            unigram_matches[unigram] = {
-                'cui': best['cui'],
-                'name': best['name'],
-                'combined_score': best['combined_score'],
-                'mesh_term': best['mesh_term'],
-                'semantic_type_names': best.get('semantic_type_names', []),
-                'allowed_type_names': best.get('allowed_type_names', []),
-                'allowed_type_tuis': best.get('allowed_type_tuis', [])
-            }
-    
-    # Get UMLS matches for bigrams
     bigram_matches = {}
-    for bigram in bigrams:
-        best = client.search_best_match(bigram, threshold=0.6)
-        if best and best.get('allowed_type_tuis'):
-            bigram_matches[bigram] = {
-                'cui': best['cui'],
-                'name': best['name'],
-                'combined_score': best['combined_score'],
-                'mesh_term': best['mesh_term'],
-                'semantic_type_names': best.get('semantic_type_names', []),
-                'allowed_type_names': best.get('allowed_type_names', []),
-                'allowed_type_tuis': best.get('allowed_type_tuis', [])
-            }
     
-    # Build PubMed query
-    pubmed_query, metadata = build_pubmed_query_unigram_bigram(unigram_matches, bigram_matches, score_threshold)
+    # 3. Execute UMLS lookups in parallel
+    # Adjust max_workers based on your API rate limits; 10 is usually safe for UMLS
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        # Submit unigram tasks
+        future_to_unigram = {
+            executor.submit(process_umls_match, term, client): term 
+            for term in unique_unigrams
+        }
+        # Submit bigram tasks
+        future_to_bigram = {
+            executor.submit(process_umls_match, term, client): term 
+            for term in unique_bigrams
+        }
+        
+        # Process unigram results
+        for future in concurrent.futures.as_completed(future_to_unigram):
+            term, data = future.result()
+            if data:
+                unigram_matches[term] = data
+                
+        # Process bigram results
+        for future in concurrent.futures.as_completed(future_to_bigram):
+            term, data = future.result()
+            if data:
+                bigram_matches[term] = data
+
+    # 4. Build PubMed query (logic unchanged)
+    pubmed_query, metadata = build_pubmed_query_unigram_bigram(
+        unigram_matches, 
+        bigram_matches, 
+        score_threshold
+    )
     
     return pubmed_query
-
 
 # Alias for backward compatibility
 def build_pubmed_query(query: str, score_threshold: float = 0.8) -> str:

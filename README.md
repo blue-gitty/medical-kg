@@ -6,29 +6,38 @@ A knowledge graph system for medical research, focusing on biological pathways l
 
 ```
 MEDKG/
-├── medkg/              # Main package
+├── medkg/                      # Main package (everything lives here)
 │   ├── __init__.py
-│   └── graph/          # Graph schema and store
-│       ├── __init__.py
-│       └── schema.py   # Node, Edge, GraphStore classes
+│   │
+│   ├── api/                    # API clients
+│   │   ├── __init__.py
+│   │   ├── umls_client.py      # UMLS API client
+│   │   └── pubmed_client.py    # PubMed API client
+│   │
+│   ├── graph/                  # Graph schema and store
+│   │   ├── __init__.py
+│   │   └── schema.py           # Node, Edge, GraphStore classes
+│   │
+│   ├── search/                 # Query Builder/N-gram logic
+│   │   ├── __init__.py
+│   │   └── builder.py          # PubMed query builder (UMLS/MeSH)
+│   │
+│   └── server.py               # MCP Server definition
 │
-├── api/                # API clients
-│   ├── __init__.py
-│   ├── umls_client.py  # UMLS API client
-│   └── pubmed_client.py # PubMed API client
-│
-├── scripts/            # Analysis scripts
+├── scripts/                    # Analysis scripts
 │   ├── northstar_analysis.py
 │   └── print_summary.py
 │
-├── examples/           # Example code
+├── examples/                   # Example code
 │   └── graph_example.py
 │
-├── data/               # Data files (JSON results)
+├── data/                       # Data files (JSON results)
 │   └── *.json
 │
-├── .env                # Environment variables (create this)
+├── .env                        # Environment variables (create this)
 ├── requirements.txt
+├── pyproject.toml              # Package configuration (optional)
+├── main.py                     # Entry point to run the server
 └── README.md
 ```
 
@@ -62,7 +71,7 @@ from medkg.graph import GraphStore, Node, Edge, Evidence
 graph = GraphStore()
 
 # Validate seed entities with UMLS
-from api.umls_client import UMLSAPIClient
+from medkg.api.umls_client import UMLSAPIClient
 umls = UMLSAPIClient()
 # Find CUI for a seed entity
 # Then validate:
@@ -86,10 +95,28 @@ graph.add_edge(edge)
 ### PubMed Search
 
 ```python
-from api.pubmed_client import PubMedAPIClient
+from medkg.api.pubmed_client import PubMedAPIClient
 
 pubmed = PubMedAPIClient()
+
+# Basic search
 results = pubmed.search("intracranial aneurysm AND inflammation", max_results=20)
+
+# Search with date filtering
+results = pubmed.search(
+    "intracranial aneurysm",
+    start_date="2020/01/01",
+    end_date="2023/12/31",
+    max_results=20
+)
+
+# Smart query builder (UMLS/MeSH)
+results = pubmed.search(
+    "What links aneurysm rupture to inflammation?",
+    use_smart_query=True,
+    max_results=20,
+    return_query=True
+)
 ```
 
 ## Global Constraints

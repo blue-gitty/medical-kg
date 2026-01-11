@@ -17,8 +17,8 @@ PUBMED_EMAIL=your_email@example.com
 ```python
 # Test imports
 from medkg.graph import GraphStore
-from api.umls_client import UMLSAPIClient
-from api.pubmed_client import PubMedAPIClient
+from medkg.api.umls_client import UMLSAPIClient
+from medkg.api.pubmed_client import PubMedAPIClient
 
 # Initialize graph
 graph = GraphStore()
@@ -27,12 +27,15 @@ print(f"Graph initialized with {len(graph.nodes)} seed nodes")
 
 ## Project Organization
 
-- **`medkg/`** - Main package with graph schema
-- **`api/`** - API clients (UMLS, PubMed)
-- **`mcp/`** - MCP server for standardized interface
+- **`medkg/`** - Main package (all code lives here)
+  - **`medkg/api/`** - API clients (UMLS, PubMed)
+  - **`medkg/graph/`** - Graph schema and store
+  - **`medkg/search/`** - Query builder (UMLS/MeSH)
+  - **`medkg/server.py`** - MCP server definition
 - **`scripts/`** - Analysis scripts
 - **`examples/`** - Example code
 - **`data/`** - JSON data files
+- **`main.py`** - Entry point to run the MCP server
 
 ## Key Features
 
