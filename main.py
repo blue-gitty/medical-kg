@@ -54,6 +54,29 @@ async def handle_get_graph_summary(arguments: dict) -> dict:
     return medkg_server.get_graph_summary()
 
 
+async def handle_search_umls(arguments: dict) -> list[dict]:
+    """Handle UMLS search request."""
+    term = arguments.get("term", "")
+    max_results = arguments.get("max_results", 10)
+    filter_semantic_types = arguments.get("filter_semantic_types", False)
+    threshold = arguments.get("threshold")
+    
+    result = medkg_server.search_umls(
+        term=term,
+        max_results=max_results,
+        filter_semantic_types=filter_semantic_types,
+        threshold=threshold,
+    )
+    
+    return result.get("results", [])
+
+
+async def handle_get_umls_concept(arguments: dict) -> dict:
+    """Handle UMLS concept lookup request."""
+    cui = arguments.get("cui", "")
+    return medkg_server.get_umls_concept(cui)
+
+
 def main():
     """Main entry point."""
     if Server is None:
@@ -72,18 +95,67 @@ def main():
         return [
             Tool(
                 name="search_pubmed",
-                description="Search PubMed with optional date filtering",
+                description=(
+                    "Search PubMed for research papers. For best results, use specific medical terms "
+                    "found via search_umls first. Supports date filtering for finding latest research "
+                    "(e.g., 'latest treatments for X'). The smart query builder (default: enabled) "
+                    "automatically converts natural language to optimized PubMed queries using UMLS/MeSH."
+                ),
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "query": {"type": "string", "description": "Search query"},
-                        "max_results": {"type": "integer", "default": 20},
-                        "full_text_only": {"type": "boolean", "default": False},
-                        "start_date": {"type": "string", "description": "Start date (YYYY/MM/DD)"},
-                        "end_date": {"type": "string", "description": "End date (YYYY/MM/DD)"},
-                        "use_smart_query": {"type": "boolean", "default": True},
+                        "query": {"type": "string", "description": "Search query (natural language or PubMed query string)"},
+                        "max_results": {"type": "integer", "default": 20, "description": "Maximum number of results"},
+                        "full_text_only": {"type": "boolean", "default": False, "description": "Filter to articles with full-text availability"},
+                        "start_date": {"type": "string", "description": "Start date for filtering (YYYY/MM/DD, YYYY/MM, or YYYY)"},
+                        "end_date": {"type": "string", "description": "End date for filtering (YYYY/MM/DD, YYYY/MM, or YYYY)"},
+                        "use_smart_query": {"type": "boolean", "default": True, "description": "Use smart query builder (UMLS/MeSH conversion)"},
                     },
                     "required": ["query"],
+                },
+            ),
+            Tool(
+                name="search_umls",
+                description=(
+                    "Search UMLS (Unified Medical Language System) for concept standardization and terminology lookup. "
+                    "Use this to find standardized CUIs for medical concepts before searching PubMed. "
+                    "The filter_semantic_types option (when enabled) restricts results to semantic types relevant to "
+                    "neurovascular research (diseases, biological processes, molecular entities, anatomical structures, biomarkers). "
+                    "This allows filtering by concept type (e.g., 'Find me drugs named X' vs 'Find me diseases named X')."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "term": {"type": "string", "description": "Medical concept term to search for (e.g., 'intracranial aneurysm', 'inflammation')"},
+                        "max_results": {"type": "integer", "default": 10, "description": "Maximum number of results to return"},
+                        "filter_semantic_types": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": (
+                                "If true, only return concepts with allowed semantic types "
+                                "(T047: Disease, T039: Physiologic Function, T116: Protein, T023: Body Part, etc.). "
+                                "Useful for filtering by concept type (diseases vs drugs vs anatomical structures)."
+                            ),
+                        },
+                        "threshold": {"type": "number", "default": None, "description": "Minimum relevance score threshold (0.0-1.0). Higher values return more precise matches."},
+                    },
+                    "required": ["term"],
+                },
+            ),
+            Tool(
+                name="get_umls_concept",
+                description=(
+                    "Get detailed information about a UMLS concept by CUI (Concept Unique Identifier). "
+                    "Returns definitions, semantic types, MeSH terms, and relations (parents/children) "
+                    "which are essential for understanding concept hierarchies and building the knowledge graph. "
+                    "Use this after search_umls to get full concept details including graph relationships."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "cui": {"type": "string", "description": "UMLS CUI (e.g., 'C0000001'). Get this from search_umls results."},
+                    },
+                    "required": ["cui"],
                 },
             ),
             Tool(
@@ -97,6 +169,10 @@ def main():
     async def call_tool(name: str, arguments: dict) -> list[dict]:
         if name == "search_pubmed":
             return await handle_search_pubmed(arguments)
+        elif name == "search_umls":
+            return await handle_search_umls(arguments)
+        elif name == "get_umls_concept":
+            return [await handle_get_umls_concept(arguments)]
         elif name == "get_graph_summary":
             return [await handle_get_graph_summary(arguments)]
         else:
