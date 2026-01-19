@@ -13,6 +13,7 @@ import logging
 from medkg.graph import GraphStore
 from medkg.api.umls_client import UMLSAPIClient
 from medkg.api.pubmed_client import PubMedAPIClient
+from medkg.api.patient_query_engine import PatientQueryEngine
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,24 @@ class MEDKGServer:
         self.graph = GraphStore()
         self.umls_client = UMLSAPIClient()
         self.pubmed_client = PubMedAPIClient()
+        self.patient_engine = PatientQueryEngine()
+    
+    def query_patient_data(
+        self,
+        select: Dict[str, List[str]],
+        entity: Optional[Dict[str, Any]] = None,
+        filters: Optional[List[Dict[str, Any]]] = None,
+        limit: int = 100
+    ) -> Dict[str, Any]:
+        """
+        Query patient data using the PatientQueryEngine.
+        """
+        return self.patient_engine.query_patient_data(
+            select=select,
+            entity=entity,
+            filters=filters,
+            limit=limit
+        )
     
     def search_pubmed(
         self,

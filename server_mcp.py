@@ -101,6 +101,52 @@ async def handle_list_tools() -> list[Tool]:
                 "required": ["cui"],
             },
         ),
+        Tool(
+            name="query_patient_data",
+            description="Query patient or aneurysm-level data using structured filters and controlled column access. Supports precise ID lookups, range filters, and column grouping.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "entity": {
+                        "type": "object",
+                        "description": "Optional: Direct lookup for a specific entity (e.g., patient 119). If provided, both type and id should be specified.",
+                        "properties": {
+                            "type": {"type": "string", "enum": ["case", "aneurysm"]},
+                            "id": {"type": ["string", "number"]}
+                        }
+                    },
+                    "filters": {
+                        "type": "array",
+                        "description": "List of filtering conditions (AND logic)",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "column": {"type": "string"},
+                                "operator": {"type": "string", "enum": ["==", "!=", "<", ">", "<=", ">=", "in", "contains", "between"]},
+                                "value": {}, 
+                                "value_type": {
+                                    "type": "string", 
+                                    "enum": ["numeric", "categorical", "boolean", "range"],
+                                    "description": "Helps cast the value correctly before filtering"
+                                }
+                            },
+                            "required": ["column", "operator", "value"]
+                        }
+                    },
+                    "select": {
+                        "type": "object",
+                        "description": "Columns to return. Can specify groups (from metadata) or specific column names.",
+                        "properties": {
+                            "groups": {"type": "array", "items": {"type": "string"}},
+                            "columns": {"type": "array", "items": {"type": "string"}}
+                        },
+                        "required": []
+                    },
+                    "limit": {"type": "integer", "default": 1000}
+                },
+                "required": ["select"]
+            }
+        ),
         # Tool(
         #     name="get_graph_summary",
         #     description="Get summary of the knowledge graph",
@@ -177,6 +223,27 @@ async def handle_call_tool(name: str, arguments: dict) -> list[TextContent]:
                 raise ValueError("cui parameter is required")
             
             result = medkg_server.get_umls_concept(cui)
+            
+            return [TextContent(
+                type="text",
+                text=json.dumps(result, indent=2, default=str)
+            )]
+
+        elif name == "query_patient_data":
+            select = arguments.get("select", {})
+            if not select:
+                raise ValueError("select parameter is required")
+                
+            entity = arguments.get("entity")
+            filters = arguments.get("filters")
+            limit = arguments.get("limit", 100)
+            
+            result = medkg_server.query_patient_data(
+                select=select,
+                entity=entity,
+                filters=filters,
+                limit=limit
+            )
             
             return [TextContent(
                 type="text",
